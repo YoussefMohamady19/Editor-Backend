@@ -281,6 +281,133 @@ function sanitizeTable(html) {
 
     return doc.body.innerHTML;
 }
+function replaceIframes(html) {
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+
+  const iframes = doc.querySelectorAll("iframe");
+
+  iframes.forEach(iframe => {
+    const src = iframe.getAttribute("src") || "";
+
+    // Extract YouTube video ID
+    let videoId = null;
+    const ytMatch = src.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]+)/);
+    if (ytMatch) videoId = ytMatch[1];
+
+    let replacementHtml = "";
+
+    if (videoId) {
+      const youtubeLink = `https://www.youtube.com/watch?v=${videoId}`;
+      const thumbnail = `https://img.youtube.com/vi/${videoId}/0.jpg`;
+
+      replacementHtml = `
+        <div style="margin:10px 0; padding:10px; border:1px solid #ccc;">
+            <p><strong>YouTube Video:</strong></p>
+            <img src="${thumbnail}" width="400" />
+            <p><a href="${youtubeLink}">${youtubeLink}</a></p>
+        </div>
+      `;
+    } else {
+      // For any other iframe, just show link
+      replacementHtml = `
+        <div style="margin:10px 0; padding:10px; border:1px solid #ccc;">
+            <p><strong>Embedded Content:</strong></p>
+            <p><a href="${src}">${src}</a></p>
+        </div>
+      `;
+    }
+
+    const wrapper = doc.createElement("div");
+    wrapper.innerHTML = replacementHtml;
+
+    iframe.replaceWith(wrapper);
+  });
+
+  return doc.body.innerHTML;
+}
+
+function sanitizeTableWithMerge(html) {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+
+    const elements = doc.querySelectorAll("table, thead, tbody, tfoot, tr, td, th");
+
+    elements.forEach((el) => {
+        const tag = el.tagName.toLowerCase();
+
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        // 1) السماح فقط لـ rowspan / colspan
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        const attrs = Array.from(el.attributes);
+        attrs.forEach(attr => {
+            const name = attr.name.toLowerCase();
+
+            if (name === "rowspan" || name === "colspan") {
+                return;
+            }
+
+            el.removeAttribute(name);
+        });
+
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        // 2) تنظيف style من mso والقيم الفاسدة
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        if (el.hasAttribute("style")) {
+            let s = el.getAttribute("style");
+
+            // إزالة mso junk
+            s = s.replace(/mso-[^:;]+:[^;]+;?/gi, "");
+
+            // إزالة قيم غير صالحة
+            s = s.replace(/@[a-zA-Z0-9\-]+/gi, "");
+
+            // إزالة أبعاد غير مطلوبة
+            s = s.replace(/width\s*:\s*[^;]+;?/gi, "");
+            s = s.replace(/height\s*:\s*[^;]+;?/gi, "");
+
+            // إزالة أي border قديم
+            s = s.replace(/border[^;]*;?/gi, "");
+
+            // حفظ التعديل أو إزالة style لو فاضي
+            if (s.trim() === "") {
+                el.removeAttribute("style");
+            } else {
+                el.setAttribute("style", s);
+            }
+        }
+
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        // 3) إضافة Borders حسب العنصر
+        // ـــــــــــــــــــــــــــــــــــــــــــــــــــــــ
+        let borderStyle = "0.2px solid black";
+
+        if (tag === "table") {
+            el.setAttribute(
+                "style",
+                "border-collapse: collapse; border: " + borderStyle + ";"
+            );
+        }
+
+        if (tag === "tr") {
+            el.setAttribute(
+                "style",
+                "border: " + borderStyle + ";"
+            );
+        }
+
+        if (tag === "td" || tag === "th") {
+            el.setAttribute(
+                "style",
+                "border: " + borderStyle + "; padding: 4px;"
+            );
+        }
+
+    });
+
+    return doc.body.innerHTML;
+}
+
 
 
 // EXPORT UPDATED DOCUMENT TO DOCX
@@ -296,9 +423,10 @@ app.post("/api/export", async (req, res) => {
                 finalHtml += `<h${n.level}>${n.title}</h${n.level}>`;
 
                 if (n.contentHtml) {
-                    let safe = cleanHtml(n.contentHtml);
-                    safe = sanitizeTable(safe);
-                    finalHtml += safe;
+                   let safe = replaceIframes(n.contentHtml);  // ← هنا الإضافة المهمة
+    safe = cleanHtml(safe);
+safe = sanitizeTableWithMerge(safe);
+    finalHtml += safe;
                 }
 
                 if (n.children && n.children.length) {
